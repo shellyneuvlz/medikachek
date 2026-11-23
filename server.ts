@@ -4,7 +4,8 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
-import { db } from './src/db/index.ts';
+import { db, withDbRetry } from './src/db/index.ts';
+import { adminAuth } from './src/lib/firebase-admin.ts';
 import {
   users,
   healthLogs,
@@ -39,7 +40,7 @@ app.use(cors());
 app.use(express.json());
 
 // Auto-initialize tables and seed database on startup
-initDatabase()
+const dbReady = initDatabase()
   .then(() => seedDatabase())
   .catch((err) => {
     console.error('Database initialization / seed check warning:', err.message);
@@ -367,7 +368,8 @@ app.post('/api/public/food-effect', async (req, res) => {
 // Register
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    await dbReady;
+    const { name, email, password } = req.body || {};
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Nama, email, dan kata sandi wajib diisi' });
     }
@@ -379,11 +381,13 @@ app.post('/api/auth/register', async (req, res) => {
     const normalizedEmail = (email || '').toLowerCase().trim();
 
     // Check existing email
-    const existing = await db
-      .select()
-      .from(users)
-      .where(sql`LOWER(TRIM(${users.email})) = LOWER(TRIM(${normalizedEmail}))`)
-      .limit(1);
+    const existing = await withDbRetry(() =>
+      db
+        .select()
+        .from(users)
+        .where(sql`LOWER(TRIM(${users.email})) = LOWER(TRIM(${normalizedEmail}))`)
+        .limit(1)
+    );
 
     if (existing.length > 0) {
       if (!existing[0].passwordHash) {
@@ -475,18 +479,112 @@ app.post('/api/auth/register', async (req, res) => {
 // Login
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password, rememberMe } = req.body;
+    await dbReady;
+    const authHeader = req.headers.authorization;
+    const { email, password, rememberMe } = req.body || {};
+
+    // Support Google/Firebase Bearer token login when sent without email/password
+    if ((!email || !password) && authHeader && authHeader.startsWith('Bearer ')) {
+      const firebaseToken = authHeader.split('Bearer ')[1].trim();
+      try {
+        const firebaseDecoded = await adminAuth.verifyIdToken(firebaseToken);
+        const fbEmail = (firebaseDecoded.email || `${firebaseDecoded.uid}@google.user`).toLowerCase().trim();
+
+        let dbUser = await withDbRetry(() =>
+          db
+            .select()
+            .from(users)
+            .where(eq(users.uid, firebaseDecoded.uid))
+            .limit(1)
+        );
+
+        if (dbUser.length === 0 && firebaseDecoded.email) {
+          dbUser = await withDbRetry(() =>
+            db
+              .select()
+              .from(users)
+              .where(sql`LOWER(TRIM(${users.email})) = LOWER(TRIM(${fbEmail}))`)
+              .limit(1)
+          );
+          if (dbUser.length > 0) {
+            const [updated] = await withDbRetry(() =>
+              db
+                .update(users)
+                .set({
+                  uid: firebaseDecoded.uid,
+                  avatar: dbUser[0].avatar || firebaseDecoded.picture || null,
+                  updatedAt: new Date(),
+                })
+                .where(eq(users.id, dbUser[0].id))
+                .returning()
+            );
+            dbUser = [updated];
+          }
+        }
+
+        if (dbUser.length === 0) {
+          const [inserted] = await withDbRetry(() =>
+            db
+              .insert(users)
+              .values({
+                uid: firebaseDecoded.uid,
+                email: fbEmail,
+                name: firebaseDecoded.name || 'Pengguna Google',
+                role: 'USER',
+                isActive: true,
+                avatar: firebaseDecoded.picture || null,
+              })
+              .returning()
+          );
+          dbUser = [inserted];
+        }
+
+        const googleUser = dbUser[0];
+        if (!googleUser.isActive) {
+          return res.status(403).json({ error: 'Akun Anda dinonaktifkan. Hubungi admin MedikaCheck.' });
+        }
+
+        const token = generateToken(
+          {
+            id: googleUser.id,
+            uid: googleUser.uid,
+            email: googleUser.email,
+            name: googleUser.name,
+            role: googleUser.role as 'ADMIN' | 'USER',
+          },
+          true
+        );
+
+        return res.json({
+          message: 'Login berhasil',
+          token,
+          user: {
+            id: googleUser.id,
+            email: googleUser.email,
+            name: googleUser.name,
+            role: googleUser.role,
+            avatar: googleUser.avatar,
+          },
+        });
+      } catch (fbErr) {
+        console.error('Firebase token login error:', fbErr);
+        return res.status(401).json({ error: 'Token Google tidak valid atau kedaluwarsa. Silakan coba lagi.' });
+      }
+    }
+
     if (!email || !password) {
       return res.status(400).json({ error: 'Email dan password wajib diisi' });
     }
 
-    const normalizedEmail = (email || '').toLowerCase().trim();
+    const normalizedEmail = String(email).toLowerCase().trim();
 
-    const foundUsers = await db
-      .select()
-      .from(users)
-      .where(sql`LOWER(TRIM(${users.email})) = LOWER(TRIM(${normalizedEmail}))`)
-      .limit(1);
+    const foundUsers = await withDbRetry(() =>
+      db
+        .select()
+        .from(users)
+        .where(sql`LOWER(TRIM(${users.email})) = LOWER(TRIM(${normalizedEmail}))`)
+        .limit(1)
+    );
 
     if (foundUsers.length === 0) {
       return res.status(401).json({ error: 'Email tidak ditemukan atau belum terdaftar. Silakan periksa kembali email Anda atau daftar akun baru.' });
@@ -502,7 +600,9 @@ app.post('/api/auth/login', async (req, res) => {
       // If user registered with Google previously without password, link password now
       const salt = await bcrypt.genSalt(10);
       const newHash = await bcrypt.hash(password, salt);
-      await db.update(users).set({ passwordHash: newHash, updatedAt: new Date() }).where(eq(users.id, user.id));
+      await withDbRetry(() =>
+        db.update(users).set({ passwordHash: newHash, updatedAt: new Date() }).where(eq(users.id, user.id))
+      );
       user.passwordHash = newHash;
     }
 
@@ -546,6 +646,7 @@ app.post('/api/auth/login', async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
+        avatar: user.avatar,
       },
     });
   } catch (error: any) {
@@ -2910,6 +3011,15 @@ app.delete('/api/admin/notifications/:id', requireAuth, requireAdmin, async (req
   } catch (error: any) {
     res.status(500).json({ error: 'Gagal menghapus notifikasi' });
   }
+});
+
+// Ensure /api routes always return structured JSON errors (never HTML error pages)
+app.use('/api', (err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled API error:', err);
+  const status = typeof err?.status === 'number' ? err.status : 500;
+  res.status(status).json({
+    error: err?.message || 'Terjadi kesalahan pada server saat memproses permintaan.',
+  });
 });
 
 // ==========================================

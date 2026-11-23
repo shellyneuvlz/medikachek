@@ -22,7 +22,10 @@ export const createPool = () => {
           connectionString,
           ssl: isSslRequired ? { rejectUnauthorized: false } : undefined,
           max: 10,
-          connectionTimeoutMillis: 15000,
+          idleTimeoutMillis: 15000,
+          connectionTimeoutMillis: 20000,
+          keepAlive: true,
+          keepAliveInitialDelayMillis: 5000,
         }
       : {
           host: process.env.SQL_HOST,
@@ -32,7 +35,10 @@ export const createPool = () => {
           database: process.env.SQL_DB_NAME,
           ssl: isSslRequired ? { rejectUnauthorized: false } : undefined,
           max: 10,
-          connectionTimeoutMillis: 15000,
+          idleTimeoutMillis: 15000,
+          connectionTimeoutMillis: 20000,
+          keepAlive: true,
+          keepAliveInitialDelayMillis: 5000,
         };
 
     global._postgresPool = new Pool(poolConfig);
@@ -47,3 +53,31 @@ export const createPool = () => {
 const pool = createPool();
 
 export const db = drizzle(pool, { schema });
+
+export async function withDbRetry<T>(operation: () => Promise<T>, maxRetries = 2): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (err: any) {
+      lastError = err;
+      const msg = String(err?.message || '').toLowerCase();
+      const code = String(err?.code || '');
+      const isTransient =
+        code === 'ECONNRESET' ||
+        code === 'ETIMEDOUT' ||
+        code === 'EPIPE' ||
+        code === '57P01' ||
+        code === '08006' ||
+        code === '08001' ||
+        msg.includes('connection terminated') ||
+        msg.includes('connection reset') ||
+        msg.includes('timeout');
+      if (!isTransient || attempt === maxRetries) {
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}

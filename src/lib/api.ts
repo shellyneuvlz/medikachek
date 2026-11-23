@@ -53,10 +53,29 @@ export async function apiRequest<T = any>(
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(endpoint, {
-    ...options,
-    headers,
-  });
+  const executeFetch = async (): Promise<Response> => {
+    return fetch(endpoint, {
+      ...options,
+      headers,
+    });
+  };
+
+  let response: Response;
+  try {
+    response = await executeFetch();
+    if (response.status === 502 || response.status === 503 || response.status === 504) {
+      await new Promise((r) => setTimeout(r, 900));
+      response = await executeFetch();
+    }
+  } catch (networkError) {
+    // Retry once on transient connection reset / server wake-up
+    await new Promise((r) => setTimeout(r, 900));
+    try {
+      response = await executeFetch();
+    } catch {
+      throw new Error('Tidak dapat terhubung ke server. Pastikan koneksi stabil lalu coba lagi.');
+    }
+  }
 
   if (response.status === 401) {
     // Session expired or invalid token
@@ -66,10 +85,23 @@ export async function apiRequest<T = any>(
     throw new Error(errorData.error || 'Sesi telah berakhir. Silakan login kembali.');
   }
 
-  const data = await response.json().catch(() => ({}));
+  const rawText = await response.text().catch(() => '');
+  let data: any = {};
+  if (rawText) {
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = {};
+    }
+  }
 
   if (!response.ok) {
-    throw new Error(data.error || 'Terjadi kesalahan pada server');
+    throw new Error(
+      data.error ||
+        (response.status >= 500
+          ? 'Server sedang memproses atau memulai ulang. Silakan coba beberapa detik lagi.'
+          : 'Terjadi kesalahan pada permintaan.')
+    );
   }
 
   return data as T;

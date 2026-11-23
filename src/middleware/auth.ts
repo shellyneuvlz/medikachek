@@ -3,7 +3,7 @@ import { verifyToken, TokenPayload } from '../lib/jwt.ts';
 import { adminAuth } from '../lib/firebase-admin.ts';
 import { db } from '../db/index.ts';
 import { users } from '../db/schema.ts';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 export interface AuthRequest extends Request {
   user?: TokenPayload;
@@ -54,12 +54,35 @@ export const requireAuth = async (
   // Try Firebase ID Token verification
   try {
     const firebaseDecoded = await adminAuth.verifyIdToken(token);
-    // Find or create in users table
+    const normalizedEmail = (firebaseDecoded.email || `${firebaseDecoded.uid}@google.user`).toLowerCase().trim();
+
+    // Find by uid or email in users table
     let dbUser = await db
       .select()
       .from(users)
       .where(eq(users.uid, firebaseDecoded.uid))
       .limit(1);
+
+    if (dbUser.length === 0 && firebaseDecoded.email) {
+      dbUser = await db
+        .select()
+        .from(users)
+        .where(sql`LOWER(TRIM(${users.email})) = LOWER(TRIM(${normalizedEmail}))`)
+        .limit(1);
+
+      if (dbUser.length > 0) {
+        const [updated] = await db
+          .update(users)
+          .set({
+            uid: firebaseDecoded.uid,
+            avatar: dbUser[0].avatar || firebaseDecoded.picture || null,
+            updatedAt: new Date(),
+          })
+          .where(eq(users.id, dbUser[0].id))
+          .returning();
+        dbUser = [updated];
+      }
+    }
 
     if (dbUser.length === 0) {
       // Auto-insert user from Google Sign In
@@ -67,7 +90,7 @@ export const requireAuth = async (
         .insert(users)
         .values({
           uid: firebaseDecoded.uid,
-          email: firebaseDecoded.email || `${firebaseDecoded.uid}@google.user`,
+          email: normalizedEmail,
           name: firebaseDecoded.name || 'Pengguna Google',
           role: 'USER',
           isActive: true,
