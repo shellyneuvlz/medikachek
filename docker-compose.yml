@@ -1,0 +1,50 @@
+services:
+  app:
+    image: node:22-alpine
+    container_name: medikacheck-app
+    restart: always
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - app_node_modules:/app/node_modules
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - SQL_HOST=postgres
+      - SQL_PORT=5432
+      - SQL_DB_NAME=medikacheck
+      - SQL_USER=medika_user
+      - SQL_PASSWORD=medika_secure_pass
+      - SQL_ADMIN_USER=medika_user
+      - SQL_ADMIN_PASSWORD=medika_secure_pass
+      - JWT_SECRET=medikacheck-jwt-secret-key-2026-production
+    command: sh -c "rm -rf /app/node_modules/canvg /app/node_modules/.canvg* /app/node_modules/.staging* && npm install --legacy-peer-deps && npx tsx server.ts"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: medikacheck-postgres
+    restart: always
+    environment:
+      - POSTGRES_DB=medikacheck
+      - POSTGRES_USER=medika_user
+      - POSTGRES_PASSWORD=medika_secure_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medika_user -d medikacheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local
+  app_node_modules:
+    driver: local

@@ -1,0 +1,6 @@
+{
+  "name": "MedikaCheck",
+  "description": "Sistem monitoring kesehatan, makanan, kondisi fisik, dan rekap laporan terintegrasi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
