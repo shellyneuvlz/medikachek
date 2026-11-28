@@ -8,7 +8,7 @@ import {
   apiRequest,
 } from '../lib/api.ts';
 import { auth, googleAuthProvider } from '../lib/firebase.ts';
-import { signInWithPopup } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
 
 interface AuthContextType {
   user: User | null;
@@ -29,6 +29,31 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const syncFirebaseTokenToBackend = async (firebaseToken: string, fallbackUser?: { uid: string; email: string | null; displayName: string | null }): Promise<{ token: string; user: User }> => {
+  try {
+    return await apiRequest<{ token: string; user: User }>('/api/auth/login', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${firebaseToken}`,
+      },
+    });
+  } catch {
+    if (fallbackUser) {
+      setStoredAuth(firebaseToken, {
+        id: 0,
+        uid: fallbackUser.uid,
+        email: fallbackUser.email || '',
+        name: fallbackUser.displayName || 'Pengguna MedikaCheck',
+        role: 'USER',
+      });
+    }
+    const meRes = await apiRequest<{ user: User }>('/api/auth/me', {
+      headers: { Authorization: `Bearer ${firebaseToken}` },
+    });
+    return { token: firebaseToken, user: meRes.user };
+  }
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(getStoredUser());
   const [token, setToken] = useState<string | null>(getStoredToken());
@@ -37,9 +62,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const clearError = () => setError(null);
 
-  // Check auth validity on mount
+  // Check auth validity and pending Google redirect result on mount
   useEffect(() => {
     const initAuth = async () => {
+      try {
+        if (auth) {
+          const redirectCred = await getRedirectResult(auth).catch(() => null);
+          if (redirectCred?.user) {
+            const firebaseToken = await redirectCred.user.getIdToken();
+            const synced = await syncFirebaseTokenToBackend(firebaseToken, redirectCred.user);
+            setStoredAuth(synced.token, synced.user, true);
+            setToken(synced.token);
+            setUser(synced.user);
+            setIsLoading(false);
+            return;
+          }
+        }
+      } catch (err: any) {
+        setError(err?.message || 'Gagal menyelesaikan login Google');
+      }
+
       const storedToken = getStoredToken();
       if (!storedToken) {
         setIsLoading(false);
@@ -49,7 +91,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const res = await apiRequest<{ user: User }>('/api/auth/me');
         setUser(res.user);
-      } catch (err) {
+      } catch {
         clearStoredAuth();
         setUser(null);
         setToken(null);
@@ -102,33 +144,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const userCredential = await signInWithPopup(auth, googleAuthProvider);
       const firebaseToken = await userCredential.user.getIdToken();
 
-      // Send to server to authenticate and sync
-      const res = await apiRequest<{ token: string; user: User }>('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${firebaseToken}`,
-        },
-      }).catch(async () => {
-        // Fetch user info via /api/auth/me directly with firebase token
-        setStoredAuth(firebaseToken, {
-          id: 0,
-          uid: userCredential.user.uid,
-          email: userCredential.user.email || '',
-          name: userCredential.user.displayName || 'Pengguna MedikaCheck',
-          role: 'USER',
-        });
-        const meRes = await apiRequest<{ user: User }>('/api/auth/me', {
-          headers: { Authorization: `Bearer ${firebaseToken}` },
-        });
-        setStoredAuth(firebaseToken, meRes.user, true);
-        return { token: firebaseToken, user: meRes.user };
-      });
+      const res = await syncFirebaseTokenToBackend(firebaseToken, userCredential.user);
 
       setStoredAuth(res.token, res.user, true);
       setToken(res.token);
       setUser(res.user);
       return res.user;
     } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/popup-blocked') {
+        const inIframe = typeof window !== 'undefined' && window.self !== window.top;
+        if (!inIframe && auth && googleAuthProvider) {
+          await signInWithRedirect(auth, googleAuthProvider);
+          return new Promise(() => {});
+        }
+        const popupMsg =
+          'Popup login Google diblokir oleh browser atau iframe pratinjau. Izinkan popup untuk situs ini di bilah alamat browser, buka aplikasi di tab baru, atau masuk dengan Email & Kata Sandi.';
+        setError(popupMsg);
+        throw new Error(popupMsg);
+      }
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        const cancelMsg = 'Jendela login Google ditutup sebelum selesai. Silakan coba lagi.';
+        setError(cancelMsg);
+        throw new Error(cancelMsg);
+      }
+      if (code === 'auth/unauthorized-domain') {
+        const domainMsg =
+          'Domain pratinjau ini belum masuk daftar domain resmi Firebase Google Auth. Silakan login menggunakan Email & Kata Sandi.';
+        setError(domainMsg);
+        throw new Error(domainMsg);
+      }
+      if (code === 'auth/network-request-failed') {
+        const netMsg = 'Koneksi ke layanan Google terganggu. Periksa internet Anda lalu coba lagi.';
+        setError(netMsg);
+        throw new Error(netMsg);
+      }
       setError(err.message || 'Gagal login dengan Google');
       throw err;
     } finally {

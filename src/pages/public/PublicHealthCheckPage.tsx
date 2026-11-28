@@ -30,6 +30,11 @@ import {
   ClipboardList,
 } from 'lucide-react';
 import { apiRequest } from '../../lib/api.ts';
+import {
+  computePublicMentalHealthCheck,
+  computePublicFoodEffect,
+  computePublicHealthCheck,
+} from '../../lib/publicScreening.ts';
 
 interface PublicHealthCheckPageProps {
   onNavigate: (path: string) => void;
@@ -196,8 +201,11 @@ Solusi terbaik adalah jeda mikro (micro-break): berdiri setiap 45 menit, lakukan
     });
   };
 
+  const [screeningError, setScreeningError] = useState<string | null>(null);
+
   const handleMentalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setScreeningError(null);
     setMentalLoading(true);
     try {
       const res = await apiRequest('/api/public/mental-health-check', {
@@ -206,8 +214,10 @@ Solusi terbaik adalah jeda mikro (micro-break): berdiri setiap 45 menit, lakukan
       });
       setMentalResult(res);
       tesRef.current?.scrollIntoView({ behavior: 'smooth' });
-    } catch (err: any) {
-      alert(err.message || 'Gagal memproses penilaian kesehatan mental');
+    } catch {
+      const fallbackRes = computePublicMentalHealthCheck(mentalData);
+      setMentalResult(fallbackRes);
+      tesRef.current?.scrollIntoView({ behavior: 'smooth' });
     } finally {
       setMentalLoading(false);
     }
@@ -227,8 +237,9 @@ Solusi terbaik adalah jeda mikro (micro-break): berdiri setiap 45 menit, lakukan
 
   const handleFoodSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setScreeningError(null);
     if (!foodData.foodName.trim()) {
-      alert('Silakan tuliskan menu makanan yang sudah Anda konsumsi');
+      setScreeningError('Silakan tuliskan menu makanan yang sudah Anda konsumsi.');
       return;
     }
     setFoodLoading(true);
@@ -239,8 +250,10 @@ Solusi terbaik adalah jeda mikro (micro-break): berdiri setiap 45 menit, lakukan
       });
       setFoodResult(res);
       tesRef.current?.scrollIntoView({ behavior: 'smooth' });
-    } catch (err: any) {
-      alert(err.message || 'Gagal menganalisis respon makanan');
+    } catch {
+      const fallbackRes = computePublicFoodEffect(foodData);
+      setFoodResult(fallbackRes);
+      tesRef.current?.scrollIntoView({ behavior: 'smooth' });
     } finally {
       setFoodLoading(false);
     }
@@ -263,6 +276,7 @@ Solusi terbaik adalah jeda mikro (micro-break): berdiri setiap 45 menit, lakukan
 
   const handleHealthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setScreeningError(null);
     setHealthLoading(true);
     try {
       const res = await apiRequest('/api/public/health-check', {
@@ -274,8 +288,13 @@ Solusi terbaik adalah jeda mikro (micro-break): berdiri setiap 45 menit, lakukan
         onSetPendingCheck(healthData);
       }
       tesRef.current?.scrollIntoView({ behavior: 'smooth' });
-    } catch (err: any) {
-      alert(err.message || 'Gagal memproses cek fisik');
+    } catch {
+      const fallbackRes = computePublicHealthCheck(healthData);
+      setHealthResult(fallbackRes);
+      if (onSetPendingCheck) {
+        onSetPendingCheck(healthData);
+      }
+      tesRef.current?.scrollIntoView({ behavior: 'smooth' });
     } finally {
       setHealthLoading(false);
     }
@@ -747,6 +766,22 @@ Solusi terbaik adalah jeda mikro (micro-break): berdiri setiap 45 menit, lakukan
             </button>
           </div>
         </div>
+
+        {screeningError && (
+          <div className="max-w-3xl mx-auto mb-6 p-3.5 rounded-xl bg-[#FAF0E8] border border-[#A87575]/50 text-[#8C5E58] text-xs sm:text-sm font-medium flex items-center justify-between gap-3">
+            <span>
+              <strong className="mr-1">Catatan:</strong>
+              {screeningError}
+            </span>
+            <button
+              type="button"
+              onClick={() => setScreeningError(null)}
+              className="text-xs underline shrink-0 cursor-pointer"
+            >
+              Tutup
+            </button>
+          </div>
+        )}
 
         {/* ======================================================== */}
         {/* TAB 1: KESEHATAN MENTAL (Questionnaire & Result)        */}
