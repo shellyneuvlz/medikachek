@@ -4,7 +4,7 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
-import { db, withDbRetry } from './src/db/index.ts';
+import { db, switchToFallbackSqlPool, withDbRetry } from './src/db/index.ts';
 import { adminAuth } from './src/lib/firebase-admin.ts';
 import {
   users,
@@ -34,6 +34,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT =
   process.env.APP_PORT ||
   (process.env.PORT && process.env.PORT !== process.env.NGINX_PORT ? process.env.PORT : '3000');
@@ -41,12 +42,54 @@ const PORT =
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '5mb' }));
 
-// Auto-initialize tables and seed database on startup
-const dbReady = initDatabase()
-  .then(() => seedDatabase())
-  .catch((err) => {
-    console.error('Database initialization / seed check warning:', err.message);
-  });
+// Auto-initialize tables and seed database lazily with retry support for serverless cold starts
+let dbInitPromise: Promise<void> | null = null;
+let dbInitialized = false;
+
+export async function ensureDbReady(): Promise<void> {
+  if (dbInitialized) return;
+  if (!dbInitPromise) {
+    dbInitPromise = (async () => {
+      try {
+        await db.execute(sql`SELECT 1`);
+      } catch (primaryErr: any) {
+        const switched = await switchToFallbackSqlPool();
+        if (switched) {
+          console.warn(
+            'Primary DATABASE_URL unavailable, switched to SQL_* PostgreSQL connection:',
+            primaryErr?.cause?.message || primaryErr?.message
+          );
+          delete process.env.DATABASE_URL;
+          delete process.env.NEON_DATABASE_URL;
+        }
+      }
+      await initDatabase();
+      await seedDatabase();
+      dbInitialized = true;
+    })().catch((err) => {
+      dbInitPromise = null;
+      console.error('Database initialization / seed check warning:', err?.message || err);
+    });
+  }
+  await dbInitPromise;
+}
+
+const dbReady = ensureDbReady();
+
+app.use('/api', async (_req, _res, next) => {
+  await ensureDbReady();
+  next();
+});
+
+// Lightweight health check for deployment verification
+app.get('/api/status', async (_req, res) => {
+  try {
+    await withDbRetry(() => db.execute(sql`SELECT 1`));
+    res.json({ ok: true, database: 'connected' });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || 'Database connection failed' });
+  }
+});
 
 // ==========================================
 // PUBLIC HEALTH CHECK & ARTICLES (NO LOGIN REQUIRED)
@@ -3053,4 +3096,19 @@ async function startServer() {
   });
 }
 
-startServer();
+const isVercel = Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+const isDirectExecution = (() => {
+  try {
+    const entry = process.argv[1] ? path.resolve(process.argv[1]) : '';
+    return entry === path.resolve(__filename);
+  } catch {
+    return false;
+  }
+})();
+
+if (!isVercel && (isDirectExecution || process.env.FORCE_SERVER_LISTEN === 'true')) {
+  startServer();
+}
+
+export { app };
+export default app;

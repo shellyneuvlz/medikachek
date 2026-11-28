@@ -146,10 +146,8 @@ export async function apiRequest<T = any>(
 
   if (!response.ok) {
     if (response.status === 404 && !parsedJson) {
-      const snippet = rawText.trim().slice(0, 60).replace(/\s+/g, ' ');
-      const diag = `[${endpoint} | ct:${contentType || 'none'}${snippet ? ` | ${snippet}` : ''}]`;
       throw new Error(
-        `Koneksi ke server API sedang memulai ulang atau sesi pratinjau kadaluarsa (HTTP 404). Silakan muat ulang halaman lalu coba lagi. ${diag}`
+        'Koneksi ke server API sedang memulai ulang atau sesi pratinjau kadaluarsa (HTTP 404). Silakan muat ulang halaman lalu coba lagi.'
       );
     }
     throw new Error(

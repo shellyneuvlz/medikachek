@@ -3,11 +3,21 @@ import * as dotenv from "dotenv";
 
 dotenv.config();
 
-const connectionString = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL;
-const sqlHost = process.env.SQL_HOST;
-const sqlDbName = process.env.SQL_DB_NAME;
-const user = process.env.SQL_ADMIN_USER || process.env.SQL_USER;
-const password = process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD;
+const connectionString = (process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '').trim();
+const sqlHost = (process.env.SQL_HOST || '').trim();
+const sqlDbName = (process.env.SQL_DB_NAME || '').trim();
+const user = (process.env.SQL_ADMIN_USER || process.env.SQL_USER || '').trim();
+const password = (process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD || '').trim();
+const isLocalHost =
+  sqlHost === 'localhost' ||
+  sqlHost === '127.0.0.1' ||
+  sqlHost === '::1' ||
+  sqlHost.startsWith('/');
+const isSslRequired =
+  process.env.DB_SSL === 'true' ||
+  sqlHost.includes('neon.tech') ||
+  sqlHost.includes('neon.com') ||
+  (process.env.DB_SSL !== 'false' && Boolean(sqlHost) && !isLocalHost);
 
 if (!connectionString && (!sqlHost || !sqlDbName || !user)) {
   console.warn("Database configuration not fully set. Set DATABASE_URL or SQL_* variables.");
@@ -28,7 +38,7 @@ export default defineConfig({
         user: user || 'postgres',
         password: password || '',
         database: sqlDbName || 'postgres',
-        ssl: false,
+        ssl: isSslRequired ? { rejectUnauthorized: false } : false,
       },
   verbose: true,
 });

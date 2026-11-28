@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { createPool } from './index.ts';
+import { createPool, getPgPoolConfig } from './index.ts';
 
 export async function initDatabase() {
   const pool = createPool();
@@ -236,34 +236,7 @@ export async function initDatabase() {
   }
 
   // 2. If tables do not exist (e.g. fresh Neon or local setup), attempt DDL
-  const connectionString = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL;
-  const isNeon = connectionString?.includes('neon.tech') || process.env.SQL_HOST?.includes('neon.tech');
-  const isSslRequired = Boolean(
-    connectionString?.includes('sslmode=') ||
-    isNeon ||
-    process.env.DB_SSL === 'true'
-  );
-
-  const adminUser = process.env.SQL_ADMIN_USER || process.env.SQL_USER;
-  const adminPassword = process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD;
-
-  const ddlConfig = connectionString
-    ? {
-        connectionString,
-        ssl: isSslRequired ? { rejectUnauthorized: false } : undefined,
-        connectionTimeoutMillis: 10000,
-      }
-    : {
-        host: process.env.SQL_HOST,
-        port: Number(process.env.SQL_PORT) || 5432,
-        user: adminUser,
-        password: adminPassword,
-        database: process.env.SQL_DB_NAME,
-        ssl: isSslRequired ? { rejectUnauthorized: false } : undefined,
-        connectionTimeoutMillis: 10000,
-      };
-
-  const ddlPool = new Pool(ddlConfig);
+  const ddlPool = new Pool(getPgPoolConfig({ useAdminCredentials: true }));
 
   try {
     await ddlPool.query(createTablesSql);
