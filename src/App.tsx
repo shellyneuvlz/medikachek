@@ -27,7 +27,7 @@ import { AdminCategoriesPage } from './pages/admin/AdminCategoriesPage.tsx';
 import { AdminNotificationsPage } from './pages/admin/AdminNotificationsPage.tsx';
 
 function MainRouter() {
-  const { user, isAuthenticated, isAdmin, isLoading } = useAuth();
+  const { user, isAuthenticated, isAdmin, isInitializing, clearError } = useAuth();
   const [currentPath, setCurrentPath] = useState<string>(() => {
     return window.location.pathname;
   });
@@ -35,6 +35,7 @@ function MainRouter() {
   // Keep browser URL in sync and handle back/forward
   useEffect(() => {
     const handlePopState = () => {
+      clearError();
       setCurrentPath(window.location.pathname);
     };
     window.addEventListener('popstate', handlePopState);
@@ -42,6 +43,7 @@ function MainRouter() {
   }, []);
 
   const navigate = (path: string) => {
+    clearError();
     window.history.pushState({}, '', path);
     setCurrentPath(path);
     window.scrollTo(0, 0);
@@ -49,7 +51,7 @@ function MainRouter() {
 
   // Route protection logic
   useEffect(() => {
-    if (isLoading) return;
+    if (isInitializing) return;
 
     if (!isAuthenticated) {
       // Admin MUST login
@@ -73,16 +75,16 @@ function MainRouter() {
         navigate('/app/dashboard');
       }
     }
-  }, [isAuthenticated, isAdmin, isLoading, currentPath]);
+  }, [isAuthenticated, isAdmin, isInitializing, currentPath]);
 
-  if (isLoading) {
+  if (isInitializing) {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white">
-        <div className="w-12 h-12 rounded-2xl bg-teal-500/20 border border-teal-500/30 flex items-center justify-center text-teal-400 mb-4 animate-pulse">
-          <span className="font-black text-xl">M</span>
+      <div className="min-h-screen bg-[#FFF5F3] flex flex-col items-center justify-center text-[#493B39]">
+        <div className="w-12 h-12 rounded-xl bg-[#FFFCFA] border border-[#D9A6A0]/50 flex items-center justify-center text-[#A87575] mb-4 shadow-xs">
+          <span className="font-serif font-bold text-xl">M</span>
         </div>
-        <div className="w-6 h-6 border-2 border-teal-400 border-t-transparent rounded-full animate-spin mb-2" />
-        <p className="text-xs text-slate-400 font-medium">Memuat MedikaCheck...</p>
+        <div className="w-6 h-6 border-2 border-[#A87575] border-t-transparent rounded-full animate-spin mb-2" />
+        <p className="text-xs text-[#493B39]/70 font-medium">Memuat Medika Check...</p>
       </div>
     );
   }

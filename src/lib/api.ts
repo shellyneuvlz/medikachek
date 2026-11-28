@@ -71,7 +71,12 @@ export async function apiRequest<T = any>(
   let response: Response;
   try {
     response = await executeFetch();
-    if (response.status === 502 || response.status === 503 || response.status === 504) {
+    if (
+      response.status === 404 ||
+      response.status === 502 ||
+      response.status === 503 ||
+      response.status === 504
+    ) {
       await new Promise((r) => setTimeout(r, 900));
       response = await executeFetch();
     }

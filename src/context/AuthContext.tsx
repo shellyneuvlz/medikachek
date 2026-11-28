@@ -15,6 +15,7 @@ interface AuthContextType {
   token: string | null;
   isAuthenticated: boolean;
   isAdmin: boolean;
+  isInitializing: boolean;
   isLoading: boolean;
   error: string | null;
   clearError: () => void;
@@ -57,7 +58,8 @@ const syncFirebaseTokenToBackend = async (firebaseToken: string, fallbackUser?: 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(getStoredUser());
   const [token, setToken] = useState<string | null>(getStoredToken());
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isInitializing, setIsInitializing] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const clearError = () => setError(null);
@@ -67,14 +69,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const initAuth = async () => {
       try {
         if (auth) {
-          const redirectCred = await getRedirectResult(auth).catch(() => null);
+          const redirectCred = await Promise.race([
+            getRedirectResult(auth).catch(() => null),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+          ]);
           if (redirectCred?.user) {
             const firebaseToken = await redirectCred.user.getIdToken();
             const synced = await syncFirebaseTokenToBackend(firebaseToken, redirectCred.user);
             setStoredAuth(synced.token, synced.user, true);
             setToken(synced.token);
             setUser(synced.user);
-            setIsLoading(false);
+            setIsInitializing(false);
             return;
           }
         }
@@ -84,7 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const storedToken = getStoredToken();
       if (!storedToken) {
-        setIsLoading(false);
+        setIsInitializing(false);
         return;
       }
 
@@ -96,7 +101,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(null);
         setToken(null);
       } finally {
-        setIsLoading(false);
+        setIsInitializing(false);
       }
     };
 
@@ -141,7 +146,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!auth || !googleAuthProvider) {
         throw new Error('Autentikasi Google belum siap di browser ini. Silakan gunakan email & password.');
       }
-      const userCredential = await signInWithPopup(auth, googleAuthProvider);
+      const userCredential = await Promise.race([
+        signInWithPopup(auth, googleAuthProvider),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject({
+                code: 'auth/popup-timeout',
+                message:
+                  'Jendela login Google tidak merespon dalam 35 detik. Kemungkinan popup diblokir browser/iframe pratinjau. Silakan izinkan popup atau masuk dengan Email & Kata Sandi.',
+              }),
+            35000
+          )
+        ),
+      ]);
       const firebaseToken = await userCredential.user.getIdToken();
 
       const res = await syncFirebaseTokenToBackend(firebaseToken, userCredential.user);
@@ -153,13 +171,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (err: any) {
       const code = err?.code || '';
       if (code === 'auth/popup-blocked') {
-        const inIframe = typeof window !== 'undefined' && window.self !== window.top;
+        let inIframe = true;
+        try {
+          inIframe = window.self !== window.top;
+        } catch {
+          inIframe = true;
+        }
         if (!inIframe && auth && googleAuthProvider) {
           await signInWithRedirect(auth, googleAuthProvider);
-          return new Promise(() => {});
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+          const redirectMsg = 'Browser tidak mengizinkan pengalihan ke halaman Google. Silakan gunakan login Email & Kata Sandi.';
+          setError(redirectMsg);
+          throw new Error(redirectMsg);
         }
         const popupMsg =
-          'Popup login Google diblokir oleh browser atau iframe pratinjau. Izinkan popup untuk situs ini di bilah alamat browser, buka aplikasi di tab baru, atau masuk dengan Email & Kata Sandi.';
+          'Popup login Google diblokir oleh browser atau iframe pratinjau. Izinkan popup di pengaturan browser, buka aplikasi di tab baru, atau masuk dengan Email & Kata Sandi.';
         setError(popupMsg);
         throw new Error(popupMsg);
       }
@@ -168,19 +194,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setError(cancelMsg);
         throw new Error(cancelMsg);
       }
-      if (code === 'auth/unauthorized-domain') {
+      if (code === 'auth/unauthorized-domain' || code === 'auth/operation-not-allowed') {
         const domainMsg =
-          'Domain pratinjau ini belum masuk daftar domain resmi Firebase Google Auth. Silakan login menggunakan Email & Kata Sandi.';
+          'Login Google belum aktif pada domain pratinjau ini. Silakan gunakan Email & Kata Sandi untuk masuk atau mendaftar.';
         setError(domainMsg);
         throw new Error(domainMsg);
       }
-      if (code === 'auth/network-request-failed') {
-        const netMsg = 'Koneksi ke layanan Google terganggu. Periksa internet Anda lalu coba lagi.';
+      if (code === 'auth/network-request-failed' || code === 'auth/internal-error' || code === 'auth/web-storage-unsupported') {
+        const netMsg =
+          'Layanan login Google tidak dapat diakses di browser/iframe ini. Silakan gunakan Email & Kata Sandi untuk masuk.';
         setError(netMsg);
         throw new Error(netMsg);
       }
-      setError(err.message || 'Gagal login dengan Google');
-      throw err;
+      const fallbackMsg = err?.message || 'Gagal login dengan Google. Silakan gunakan Email & Kata Sandi.';
+      setError(fallbackMsg);
+      throw new Error(fallbackMsg);
     } finally {
       setIsLoading(false);
     }
@@ -276,6 +304,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         token,
         isAuthenticated: !!user && !!token,
         isAdmin: user?.role === 'ADMIN',
+        isInitializing,
         isLoading,
         error,
         clearError,
