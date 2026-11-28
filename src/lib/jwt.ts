@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'medikacheck-jwt-secret-key-2026-secure';
+const JWT_SECRET = (process.env.JWT_SECRET || '').trim() || 'medikacheck-jwt-secret-key-2026-secure';
 
 export interface TokenPayload {
   id: number;

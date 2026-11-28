@@ -33,7 +33,7 @@ function loadFirebaseProjectId(): string | undefined {
     }
   }
 
-  return undefined;
+  return 'mimetic-liberty-7xctm';
 }
 
 if (!getApps().length) {

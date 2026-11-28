@@ -1,11 +1,15 @@
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool, PoolConfig } from 'pg';
-import * as schema from './schema.ts';
+import * as schema from './schema';
 
 declare global {
   var _postgresPool: Pool | undefined;
   var _drizzleDb: ReturnType<typeof drizzle<typeof schema>> | undefined;
+}
+
+function cleanEnvValue(value?: string): string {
+  return (value || '').trim().replace(/^['"]|['"]$/g, '');
 }
 
 export function getPgPoolConfig(options?: {
@@ -14,20 +18,23 @@ export function getPgPoolConfig(options?: {
 }): PoolConfig {
   const connectionString = options?.ignoreConnectionString
     ? ''
-    : (process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '').trim();
-  const sqlHost = (process.env.SQL_HOST || '').trim();
-  const sqlPort = Number((process.env.SQL_PORT || '').trim()) || 5432;
-  const sqlDbName = (process.env.SQL_DB_NAME || '').trim();
-  const sqlUser = (
+    : cleanEnvValue(process.env.DATABASE_URL || process.env.NEON_DATABASE_URL);
+  const rawHost = cleanEnvValue(process.env.SQL_HOST);
+  const sqlHost = rawHost.startsWith('/')
+    ? rawHost
+    : rawHost.replace(/^https?:\/\//i, '').replace(/\/+$/, '').split(':')[0];
+  const sqlPort = Number(cleanEnvValue(process.env.SQL_PORT)) || 5432;
+  const sqlDbName = cleanEnvValue(process.env.SQL_DB_NAME);
+  const sqlUser = cleanEnvValue(
     options?.useAdminCredentials
       ? process.env.SQL_ADMIN_USER || process.env.SQL_USER
       : process.env.SQL_USER
-  )?.trim();
-  const sqlPassword = (
+  );
+  const sqlPassword = cleanEnvValue(
     options?.useAdminCredentials
       ? process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD
       : process.env.SQL_PASSWORD
-  )?.trim();
+  );
 
   const isLocalHost =
     sqlHost === 'localhost' ||
@@ -40,7 +47,7 @@ export function getPgPoolConfig(options?: {
     sqlHost.includes('neon.tech') ||
     sqlHost.includes('neon.com');
 
-  const explicitSslDisabled = process.env.DB_SSL === 'false';
+  const explicitSslDisabled = cleanEnvValue(process.env.DB_SSL) === 'false';
   const isSslRequired =
     connectionString.includes('sslmode=') ||
     isNeon ||

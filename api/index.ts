@@ -1,11 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import app, { ensureDbReady } from '../server.ts';
-
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+import app from '../src/expressApp';
 
 function normalizeVercelApiUrl(req: IncomingMessage): void {
   const rawUrl = req.url || '/api';
@@ -19,6 +13,9 @@ function normalizeVercelApiUrl(req: IncomingMessage): void {
       : `/api${rewrittenPath.startsWith('/') ? '' : '/'}${rewrittenPath}`;
     const remainingQuery = parsed.searchParams.toString();
     req.url = remainingQuery ? `${cleanPath}?${remainingQuery}` : cleanPath;
+  } else if (parsed.pathname === '/api/index' || parsed.pathname === '/api/index.ts') {
+    const remainingQuery = parsed.searchParams.toString();
+    req.url = remainingQuery ? `/api?${remainingQuery}` : '/api';
   } else if (!parsed.pathname.startsWith('/api')) {
     const remainingQuery = parsed.searchParams.toString();
     const prefixed = `/api${parsed.pathname.startsWith('/') ? '' : '/'}${parsed.pathname}`;
@@ -26,16 +23,10 @@ function normalizeVercelApiUrl(req: IncomingMessage): void {
   }
 }
 
-export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+export default function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   normalizeVercelApiUrl(req);
 
-  try {
-    await ensureDbReady();
-  } catch (err: any) {
-    console.error('Vercel API DB initialization error:', err?.message || err);
-  }
-
-  await new Promise<void>((resolve) => {
+  return new Promise<void>((resolve) => {
     let settled = false;
     const done = () => {
       if (!settled) {
@@ -48,6 +39,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     res.on('close', done);
 
     try {
+      // Invoke Express synchronously so express.json() attaches before request body stream events drain
       app(req as any, res as any);
     } catch (err: any) {
       console.error('Vercel Express handler error:', err);

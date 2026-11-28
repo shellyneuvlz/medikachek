@@ -1,8 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyToken, TokenPayload } from '../lib/jwt.ts';
-import { adminAuth } from '../lib/firebase-admin.ts';
-import { db } from '../db/index.ts';
-import { users } from '../db/schema.ts';
+import { verifyToken, TokenPayload } from '../lib/jwt';
+import { adminAuth } from '../lib/firebase-admin';
+import { db } from '../db/index';
+import { users } from '../db/schema';
 import { eq, sql } from 'drizzle-orm';
 
 export interface AuthRequest extends Request {

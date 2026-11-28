@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { createPool, getPgPoolConfig } from './index.ts';
+import { createPool, getPgPoolConfig } from './index';
 
 export async function initDatabase() {
   const pool = createPool();

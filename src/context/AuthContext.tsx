@@ -146,6 +146,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!auth || !googleAuthProvider) {
         throw new Error('Autentikasi Google belum siap di browser ini. Silakan gunakan email & password.');
       }
+      let inIframe = false;
+      try {
+        inIframe = window.self !== window.top;
+      } catch {
+        inIframe = true;
+      }
+
       const popupPromise = signInWithPopup(auth, googleAuthProvider);
       const guardedPopup = new Promise<typeof popupPromise extends Promise<infer U> ? U : never>(
         (resolve, reject) => {
@@ -155,19 +162,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const onBlur = () => {
             popupFocused = true;
           };
-          window.addEventListener('blur', onBlur, { once: true });
+          if (inIframe) {
+            window.addEventListener('blur', onBlur, { once: true });
+          }
 
-          const quickCheckTimer = setTimeout(() => {
-            if (!settled && !popupFocused && document.hasFocus()) {
-              settled = true;
-              window.removeEventListener('blur', onBlur);
-              reject({
-                code: 'auth/popup-blocked',
-                message:
-                  'Popup login Google tidak dapat dibuka di dalam pratinjau iframe ini.',
-              });
-            }
-          }, 2200);
+          const quickCheckTimer = inIframe
+            ? setTimeout(() => {
+                if (!settled && !popupFocused && document.hasFocus()) {
+                  settled = true;
+                  window.removeEventListener('blur', onBlur);
+                  reject({
+                    code: 'auth/popup-blocked',
+                    message:
+                      'Popup login Google tidak dapat dibuka di dalam pratinjau iframe ini.',
+                  });
+                }
+              }, 2200)
+            : null;
 
           const hardTimeoutTimer = setTimeout(() => {
             if (!settled) {
@@ -185,7 +196,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .then((cred) => {
               if (!settled) {
                 settled = true;
-                clearTimeout(quickCheckTimer);
+                if (quickCheckTimer) clearTimeout(quickCheckTimer);
                 clearTimeout(hardTimeoutTimer);
                 window.removeEventListener('blur', onBlur);
                 resolve(cred);
@@ -194,7 +205,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .catch((err) => {
               if (!settled) {
                 settled = true;
-                clearTimeout(quickCheckTimer);
+                if (quickCheckTimer) clearTimeout(quickCheckTimer);
                 clearTimeout(hardTimeoutTimer);
                 window.removeEventListener('blur', onBlur);
                 reject(err);

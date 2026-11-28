@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { db } from './index.ts';
+import { db } from './index';
 import {
   users,
   healthLogs,
@@ -14,7 +14,7 @@ import {
   educationArticles,
   categories,
   notifications,
-} from './schema.ts';
+} from './schema';
 import { eq } from 'drizzle-orm';
 
 export async function seedDatabase() {
@@ -196,8 +196,8 @@ Menjaga sleep hygiene seperti mematikan layar gadget 30 menit sebelum tidur terb
       { offset: 0, time: '08:00', energy: 9, mood: 'Sangat Baik', body: 'Sangat Segar', stomach: 'Nyaman', stress: 2, notes: 'Kondisi tubuh prima hari ini.' },
     ];
 
-    for (const h of healthData) {
-      await db.insert(healthLogs).values({
+    await db.insert(healthLogs).values(
+      healthData.map((h) => ({
         userId: demoUser.id,
         date: getDateStr(h.offset),
         time: h.time,
@@ -207,8 +207,8 @@ Menjaga sleep hygiene seperti mematikan layar gadget 30 menit sebelum tidur terb
         stomachCondition: h.stomach,
         stressLevel: h.stress,
         notes: h.notes,
-      });
-    }
+      }))
+    );
 
     // 8. Seed Meals + Pre-Meal & Post-Meal Logs for Demo User
     const mealsSeed = [
@@ -334,8 +334,8 @@ Menjaga sleep hygiene seperti mematikan layar gadget 30 menit sebelum tidur terb
       { offset: 0, sleep: '22:30', wake: '06:30', duration: 8.0, quality: 5, notes: 'Bangun dengan segar bugar.' },
     ];
 
-    for (const s of sleepData) {
-      await db.insert(sleepLogs).values({
+    await db.insert(sleepLogs).values(
+      sleepData.map((s) => ({
         userId: demoUser.id,
         date: getDateStr(s.offset),
         sleepTime: s.sleep,
@@ -343,8 +343,8 @@ Menjaga sleep hygiene seperti mematikan layar gadget 30 menit sebelum tidur terb
         durationHours: s.duration,
         quality: s.quality,
         notes: s.notes,
-      });
-    }
+      }))
+    );
 
     // 11. Seed Activity Logs
     const activityData = [
@@ -355,8 +355,8 @@ Menjaga sleep hygiene seperti mematikan layar gadget 30 menit sebelum tidur terb
       { offset: 0, name: 'Bersepeda Santai', duration: 35, intensity: 'Sedang', time: '06:45', notes: 'Menikmati udara pagi.' },
     ];
 
-    for (const a of activityData) {
-      await db.insert(activityLogs).values({
+    await db.insert(activityLogs).values(
+      activityData.map((a) => ({
         userId: demoUser.id,
         activityName: a.name,
         durationMinutes: a.duration,
@@ -364,8 +364,8 @@ Menjaga sleep hygiene seperti mematikan layar gadget 30 menit sebelum tidur terb
         date: getDateStr(a.offset),
         time: a.time,
         notes: a.notes,
-      });
-    }
+      }))
+    );
 
     // 12. Seed Hydration Logs
     const hydrationData = [
@@ -378,15 +378,15 @@ Menjaga sleep hygiene seperti mematikan layar gadget 30 menit sebelum tidur terb
       { offset: 0, amount: 400, time: '18:30', notes: 'Menjelang makan malam' },
     ];
 
-    for (const hy of hydrationData) {
-      await db.insert(hydrationLogs).values({
+    await db.insert(hydrationLogs).values(
+      hydrationData.map((hy) => ({
         userId: demoUser.id,
         amountMl: hy.amount,
         date: getDateStr(hy.offset),
         time: hy.time,
         notes: hy.notes,
-      });
-    }
+      }))
+    );
 
     console.log('MedikaCheck database seeded successfully!');
   } catch (err) {
