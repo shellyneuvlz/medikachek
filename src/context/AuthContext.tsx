@@ -167,7 +167,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   'Popup login Google tidak dapat dibuka di dalam pratinjau iframe ini.',
               });
             }
-          }, 4000);
+          }, 2200);
 
           const hardTimeoutTimer = setTimeout(() => {
             if (!settled) {

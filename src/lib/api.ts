@@ -61,17 +61,24 @@ export async function apiRequest<T = any>(
   }
 
   const executeFetch = async (): Promise<Response> => {
-    return fetch(endpoint, {
-      ...options,
-      headers,
-      credentials: 'same-origin',
-      cache: 'no-store',
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    try {
+      return await fetch(endpoint, {
+        ...options,
+        headers,
+        credentials: 'same-origin',
+        cache: 'no-store',
+        signal: options.signal || controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
   };
 
   let response: Response;
   let lastNetworkError: unknown = null;
-  const retryDelays = [600, 1200];
+  const retryDelays = [500, 1000];
 
   for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
     try {
@@ -85,9 +92,13 @@ export async function apiRequest<T = any>(
         break;
       }
       await new Promise((r) => setTimeout(r, retryDelays[attempt]));
-    } catch (err) {
+    } catch (err: any) {
       lastNetworkError = err;
-      if (attempt === retryDelays.length) {
+      if (err?.name === 'AbortError') {
+        if (attempt === retryDelays.length) {
+          throw new Error('Permintaan ke server melebihi batas waktu (timeout). Silakan coba lagi.');
+        }
+      } else if (attempt === retryDelays.length) {
         throw new Error('Tidak dapat terhubung ke server. Pastikan koneksi stabil lalu coba lagi.');
       }
       await new Promise((r) => setTimeout(r, retryDelays[attempt]));
@@ -135,8 +146,10 @@ export async function apiRequest<T = any>(
 
   if (!response.ok) {
     if (response.status === 404 && !parsedJson) {
+      const snippet = rawText.trim().slice(0, 60).replace(/\s+/g, ' ');
+      const diag = `[${endpoint} | ct:${contentType || 'none'}${snippet ? ` | ${snippet}` : ''}]`;
       throw new Error(
-        'Koneksi ke server API sedang memulai ulang atau sesi pratinjau kadaluarsa (HTTP 404). Silakan muat ulang halaman lalu coba lagi.'
+        `Koneksi ke server API sedang memulai ulang atau sesi pratinjau kadaluarsa (HTTP 404). Silakan muat ulang halaman lalu coba lagi. ${diag}`
       );
     }
     throw new Error(

@@ -41,12 +41,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
     try {
       const user = await login(cleanEmail, password, rememberMe);
 
-      // Check if user came from guest health check
+      // Sync guest checks in background without blocking navigation
       const pendingCheckStr = sessionStorage.getItem('pending_health_check');
       if (pendingCheckStr && user.role !== 'ADMIN') {
         try {
           const pendingData = JSON.parse(pendingCheckStr);
-          await apiRequest('/api/health', {
+          sessionStorage.removeItem('pending_health_check');
+          void apiRequest('/api/health', {
             method: 'POST',
             body: JSON.stringify({
               date: new Date().toISOString().split('T')[0],
@@ -58,19 +59,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               stressLevel: pendingData.stressLevel || 3,
               notes: pendingData.symptoms ? `Pemeriksaan mandiri awal (Keluhan: ${pendingData.symptoms})` : 'Pemeriksaan mandiri awal',
             }),
-          });
-          sessionStorage.removeItem('pending_health_check');
-        } catch (e) {
-          console.error('Failed to sync pending health check:', e);
-        }
+          }).catch(() => {});
+        } catch {}
       }
 
-      // Check if user came from guest food effect check
       const pendingMealStr = sessionStorage.getItem('pending_meal_check');
       if (pendingMealStr && user.role !== 'ADMIN') {
         try {
           const mealData = JSON.parse(pendingMealStr);
-          await apiRequest('/api/meals', {
+          sessionStorage.removeItem('pending_meal_check');
+          void apiRequest('/api/meals', {
             method: 'POST',
             body: JSON.stringify({
               name: mealData.foodName,
@@ -95,11 +93,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
                 notes: 'Menunggu follow-up respon lambung',
               },
             }),
-          });
-          sessionStorage.removeItem('pending_meal_check');
-        } catch (e) {
-          console.error('Failed to sync pending meal check:', e);
-        }
+          }).catch(() => {});
+        } catch {}
       }
 
       if (user.role === 'ADMIN') {
@@ -107,8 +102,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
       } else {
         onNavigate('/app/dashboard');
       }
-    } catch {
-      // Error handled in AuthContext
+    } catch (err: any) {
+      if (err?.message) {
+        setValidationError(err.message);
+      }
     }
   };
 
