@@ -146,20 +146,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!auth || !googleAuthProvider) {
         throw new Error('Autentikasi Google belum siap di browser ini. Silakan gunakan email & password.');
       }
-      const userCredential = await Promise.race([
-        signInWithPopup(auth, googleAuthProvider),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () =>
+      const popupPromise = signInWithPopup(auth, googleAuthProvider);
+      const guardedPopup = new Promise<typeof popupPromise extends Promise<infer U> ? U : never>(
+        (resolve, reject) => {
+          let settled = false;
+          let popupFocused = false;
+
+          const onBlur = () => {
+            popupFocused = true;
+          };
+          window.addEventListener('blur', onBlur, { once: true });
+
+          const quickCheckTimer = setTimeout(() => {
+            if (!settled && !popupFocused && document.hasFocus()) {
+              settled = true;
+              window.removeEventListener('blur', onBlur);
+              reject({
+                code: 'auth/popup-blocked',
+                message:
+                  'Popup login Google tidak dapat dibuka di dalam pratinjau iframe ini.',
+              });
+            }
+          }, 4000);
+
+          const hardTimeoutTimer = setTimeout(() => {
+            if (!settled) {
+              settled = true;
+              window.removeEventListener('blur', onBlur);
               reject({
                 code: 'auth/popup-timeout',
                 message:
-                  'Jendela login Google tidak merespon dalam 35 detik. Kemungkinan popup diblokir browser/iframe pratinjau. Silakan izinkan popup atau masuk dengan Email & Kata Sandi.',
-              }),
-            35000
-          )
-        ),
-      ]);
+                  'Login Google melebihi batas waktu tunggu. Silakan coba lagi, buka aplikasi di tab baru, atau masuk dengan Email & Kata Sandi.',
+              });
+            }
+          }, 90000);
+
+          popupPromise
+            .then((cred) => {
+              if (!settled) {
+                settled = true;
+                clearTimeout(quickCheckTimer);
+                clearTimeout(hardTimeoutTimer);
+                window.removeEventListener('blur', onBlur);
+                resolve(cred);
+              }
+            })
+            .catch((err) => {
+              if (!settled) {
+                settled = true;
+                clearTimeout(quickCheckTimer);
+                clearTimeout(hardTimeoutTimer);
+                window.removeEventListener('blur', onBlur);
+                reject(err);
+              }
+            });
+        }
+      );
+
+      const userCredential = await guardedPopup;
       const firebaseToken = await userCredential.user.getIdToken();
 
       const res = await syncFirebaseTokenToBackend(firebaseToken, userCredential.user);

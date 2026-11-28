@@ -282,6 +282,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
                 if (err?.message) {
                   setValidationError(err.message);
                 }
+                setTimeout(() => {
+                  const el = document.getElementById('google-login-feedback');
+                  if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                  }
+                }, 60);
               } finally {
                 setGoogleLoading(false);
               }
@@ -318,6 +324,23 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               </>
             )}
           </button>
+
+          {(validationError || error) && (validationError || error || '').toLowerCase().includes('google') && (
+            <div
+              id="google-login-feedback"
+              className="mt-3 p-3 rounded-md bg-[#FAF0E8] border border-[#A87575]/40 text-[#8C5E58] text-xs space-y-2"
+            >
+              <p className="leading-relaxed">{validationError || error}</p>
+              <a
+                href={typeof window !== 'undefined' ? window.location.href : '/login'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 font-semibold text-[#8C5E58] underline hover:text-[#493B39]"
+              >
+                Buka aplikasi di tab browser baru untuk Login Google →
+              </a>
+            </div>
+          )}
 
 
           {/* Register Link */}

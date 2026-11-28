@@ -65,29 +65,39 @@ export async function apiRequest<T = any>(
       ...options,
       headers,
       credentials: 'same-origin',
+      cache: 'no-store',
     });
   };
 
   let response: Response;
-  try {
-    response = await executeFetch();
-    if (
-      response.status === 404 ||
-      response.status === 502 ||
-      response.status === 503 ||
-      response.status === 504
-    ) {
-      await new Promise((r) => setTimeout(r, 900));
-      response = await executeFetch();
-    }
-  } catch {
-    // Retry once on transient connection reset / server wake-up
-    await new Promise((r) => setTimeout(r, 900));
+  let lastNetworkError: unknown = null;
+  const retryDelays = [600, 1200];
+
+  for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
     try {
       response = await executeFetch();
-    } catch {
-      throw new Error('Tidak dapat terhubung ke server. Pastikan koneksi stabil lalu coba lagi.');
+      const shouldRetry =
+        response.status === 404 ||
+        response.status === 502 ||
+        response.status === 503 ||
+        response.status === 504;
+      if (!shouldRetry || attempt === retryDelays.length) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, retryDelays[attempt]));
+    } catch (err) {
+      lastNetworkError = err;
+      if (attempt === retryDelays.length) {
+        throw new Error('Tidak dapat terhubung ke server. Pastikan koneksi stabil lalu coba lagi.');
+      }
+      await new Promise((r) => setTimeout(r, retryDelays[attempt]));
     }
+  }
+
+  if (!response!) {
+    throw lastNetworkError instanceof Error
+      ? lastNetworkError
+      : new Error('Tidak dapat terhubung ke server. Pastikan koneksi stabil lalu coba lagi.');
   }
 
   const rawText = await response.text().catch(() => '');
@@ -100,14 +110,16 @@ export async function apiRequest<T = any>(
 
   if (isHtmlResponse) {
     throw new Error(
-      `Sesi pratinjau halaman perlu disegarkan (HTTP ${response.status}). Silakan refresh halaman lalu coba kembali.`
+      `Sesi pratinjau halaman perlu disegarkan (HTTP ${response.status}). Silakan muat ulang (refresh) halaman lalu coba kembali.`
     );
   }
 
   let data: any = {};
+  let parsedJson = false;
   if (rawText) {
     try {
       data = JSON.parse(rawText);
+      parsedJson = true;
     } catch {
       data = {};
     }
@@ -122,6 +134,11 @@ export async function apiRequest<T = any>(
   }
 
   if (!response.ok) {
+    if (response.status === 404 && !parsedJson) {
+      throw new Error(
+        'Koneksi ke server API sedang memulai ulang atau sesi pratinjau kadaluarsa (HTTP 404). Silakan muat ulang halaman lalu coba lagi.'
+      );
+    }
     throw new Error(
       data.error ||
         (response.status >= 500

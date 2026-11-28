@@ -50,8 +50,11 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
       await register(name.trim(), cleanEmail, password);
       // Automatically redirect to user dashboard
       onNavigate('/app/dashboard');
-    } catch {
-      // Handled in context
+    } catch (err: any) {
+      if (err?.message) {
+        setValidationError(err.message);
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
